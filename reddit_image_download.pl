@@ -4,7 +4,7 @@ use warnings;
 use LWP::UserAgent;
 use JSON;
 use File::Basename;
-use File::Path qw(make_path);
+use File::Path qw(make_path remove_tree);
 use Digest::MD5 qw(md5_hex);
 use POSIX qw(strftime);
 use URI;
@@ -101,7 +101,7 @@ sub download_images {
     print color('reset');
 }
 
-# Function to delete a reference from history
+## Function to delete a reference from history and remove folder
 sub delete_reference {
     my ($history) = @_;
     my @keys = keys %$history;
@@ -125,9 +125,33 @@ sub delete_reference {
     if (defined $keys[$choice]) {
         my $key = $keys[$choice];
         delete $history->{$key};
-        print color('bold green');
-        print "Deleted reference to $key.\n";
-        print color('reset');
+
+        my $dir;
+        if ($key =~ m{^u/(.+)$}) {
+            $dir = "downloads/user_images/$1";  # Strip 'u/' prefix
+        } elsif ($key =~ m{^r/(.+)$}) {
+            $dir = "downloads/subreddit_images/$1";  # Strip 'r/' prefix
+        }
+
+        if ($dir && -d $dir) {
+            print "Are you sure you want to delete the folder '$dir' and all its contents? (yes/no): ";
+            my $confirm = <STDIN>;
+            chomp $confirm;
+            if (lc $confirm eq 'yes') {
+                remove_tree($dir);
+                print color('bold green');
+                print "Deleted reference and folder for $key.\n";
+                print color('reset');
+            } else {
+                print color('bold yellow');
+                print "Folder deletion canceled.\n";
+                print color('reset');
+            }
+        } else {
+            print color('bold yellow');
+            print "Directory $dir does not exist.\n";
+            print color('reset');
+        }
     } else {
         print color('bold red');
         print "Invalid choice.\n";
@@ -360,4 +384,3 @@ MENU: while (1) {
     # Save the updated history
     store $history, $log_file;
 }
-
