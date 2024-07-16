@@ -3,6 +3,10 @@ Tested in Debian 12.
 
 I would place this script in a folder that can be easily found by any docker apps you may be using..
 
+
+it creates a ".forcegallery" file in each subfolder for those using something called "stashapp" in docker.
+
+
 run it with "perl reddit_image_download.pl"
 
 it downloads images stored on Reddit servers and creates a folder tree.
