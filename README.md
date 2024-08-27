@@ -18,7 +18,7 @@ it stores the name of your downloads in a .dat file.
 
 option 1) Either r/something or u/something and then the number of images you would like to obtain. This defaults to 9999.
 
-option 2) Look at the .dat file and select an existing user or aubreddit. 
+option 2) Look at the .dat file and select an existing user or subreddit. 
 Good for checking for uodates..
 
 option 3) Delete a reference from the .dat file and the corresponding directory.
