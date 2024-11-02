@@ -11,6 +11,46 @@ use URI;
 use Storable qw(retrieve store);
 use Term::ANSIColor;
 
+sub download_image {
+    my ($url, $date, $author, $dir, $ua, $hashes_ref) = @_;
+
+    my $is_external = ($url !~ /^https?:\/\/(i\.)?redd\.it\//);
+
+    my $filename = basename($url);
+    $filename = "$date-$author-$filename";
+    $filename = "external-$filename" if $is_external;
+
+    # Strip 'u/' or 'r/' prefix from $dir
+    $dir =~ s/^u\///;
+    $dir =~ s/^r\///;
+
+    my $path = "$dir/$filename";
+
+    if (-e $path) {
+        # Return 1 if the image was already downloaded
+        return 1;
+    }
+
+    my $content = $ua->get($url)->decoded_content;
+    return unless defined $content;
+
+    my $hash = md5_hex($content);
+    return if exists $hashes_ref->{$hash};
+
+    open my $fh, '>', $path or die "Could not open $path: $!\n";
+    binmode $fh;
+    print $fh $content;
+    close $fh;
+
+    $hashes_ref->{$hash} = 1;
+    print color('bold cyan');
+    print "Downloaded image: $url\n";
+    print color('reset');
+
+    # Return 0 if the image was already downloaded
+    return 0
+}
+
 # Function to download images
 sub download_images {
     my ($download_url, $dir, $num) = @_;
@@ -42,47 +82,30 @@ sub download_images {
 
         foreach my $post (@{$data->{'data'}->{'children'}}) {
             my $url = $post->{'data'}->{'url'};
+            my $gallery_data = $post->{'data'}->{'gallery_data'}->{'items'};
             my $author = $post->{'data'}->{'author'};
             my $created_utc = $post->{'data'}->{'created_utc'};
             my $date = strftime("%d-%m-%Y", gmtime($created_utc));
 
-            next unless defined $url && $url =~ /\.(jpe?g|png|gif)$/i;
             next unless defined $author;
+            next unless defined $url;
 
-            my $is_external = ($url !~ /^https?:\/\/(i\.)?redd\.it\//);
-
-            my $filename = basename($url);
-            $filename = "$date-$author-$filename";
-            $filename = "external-$filename" if $is_external;
-
-            # Strip 'u/' or 'r/' prefix from $dir
-            $dir =~ s/^u\///;
-            $dir =~ s/^r\///;
-
-            my $path = "$dir/$filename";
-
-            if (-e $path) {
-                $pdownloaded++;
+            my @urls;
+            if ($url =~ /\/gallery\//) {
+                @urls = map { "https://i.redd.it/" . $_->{'media_id'} . ".jpg" } @$gallery_data;
+            } elsif ($url =~ /\.(jpe?g|png|gif)$/i) {
+                @urls = ($url);
+            } else {
+                $non_image_count++;
                 next;
             }
 
-            my $content = $ua->get($url)->decoded_content;
-            next unless defined $content;
-
-            my $hash = md5_hex($content);
-            next if exists $hashes{$hash};
-
-            open my $fh, '>', $path or die "Could not open $path: $!\n";
-            binmode $fh;
-            print $fh $content;
-            close $fh;
-
-            $hashes{$hash} = 1;
-            print color('bold cyan');
-            print "Downloaded image: $url\n";
-            print color('reset');
-
-            $count++;
+            my $res;
+            foreach my $phurl (@urls) {
+                $res = download_image($phurl, $date, $author, $dir, $ua, \%hashes);
+                $count++ if ($res == 0);
+                $pdownloaded++ if ($res == 1);
+            }
             last if $count >= $num;
         }
 
@@ -296,7 +319,7 @@ MENU: while (1) {
             my $subreddit_choices = <STDIN>;
             chomp $subreddit_choices;
             next MENU if $subreddit_choices eq 'back';
-            
+
             my @selected_indices = split /,\s*/, $subreddit_choices;
             my @selected_subreddits;
             my %subreddit_nums;
@@ -326,7 +349,7 @@ MENU: while (1) {
                 $num = $subreddit_nums{$subreddit};
                 my $dir = "downloads/subreddit_images/$subreddit";  # New directory structure
                 make_path($dir);
-                my $url = "https://www.reddit.com/r/$subreddit.json?limit=100";
+                my $url = "https://www.reddit.com/r/$subreddit/new.json?limit=100";
 
                 download_images($url, $dir, $num);
                 # Save the updated history after downloading images
@@ -350,7 +373,7 @@ MENU: while (1) {
     if ($name =~ m{^u/}) {
         $url = "https://www.reddit.com/user/" . substr($name, 2) . ".json?limit=100";
     } elsif ($name =~ m{^r/}) {
-        $url = "https://www.reddit.com/r/" . substr($name, 2) . ".json?limit=100";
+        $url = "https://www.reddit.com/r/" . substr($name, 2) . "/new.json?limit=100";
     } else {
         print color('bold red');
         print "Invalid name. Please enter a subreddit or user name in the format of u/name or r/name.\n";
