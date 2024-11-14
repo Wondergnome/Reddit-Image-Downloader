@@ -20,6 +20,24 @@ sub download_images {
     my %hashes;
     my $ua = LWP::UserAgent->new(agent => 'Mozilla/5.0');
 
+    # Ensure directory exists and create .forcegallery file immediately
+    my $base_dir = $dir;
+    $base_dir =~ s/^u\///;  # Remove 'u/' prefix if it exists
+    $base_dir =~ s/^r\///;  # Remove 'r/' prefix if it exists
+
+    # Define full path for images based on type (user or subreddit)
+    if ($dir =~ /^u\//) {
+        $base_dir = "downloads/user_images/$base_dir";
+    } elsif ($dir =~ /^r\//) {
+        $base_dir = "downloads/subreddit_images/$base_dir";
+    }
+
+    unless (-d $base_dir) {
+        make_path($base_dir) or die "Failed to create directory $base_dir: $!\n";
+        open my $force_fh, '>', "$base_dir/.forcegallery" or die "Could not create .forcegallery file: $!\n";
+        close $force_fh;
+    }
+
     while ($download_url && $count < $num) {
         print color('bold green');
         print "Fetching data from URL: $download_url\n";
@@ -55,11 +73,7 @@ sub download_images {
             $filename = "$date-$author-$filename";
             $filename = "external-$filename" if $is_external;
 
-            # Strip 'u/' or 'r/' prefix from $dir
-            $dir =~ s/^u\///;
-            $dir =~ s/^r\///;
-
-            my $path = "$dir/$filename";
+            my $path = "$base_dir/$filename";
 
             if (-e $path) {
                 $pdownloaded++;
@@ -90,18 +104,13 @@ sub download_images {
         $download_url = "$download_url&after=" . $data->{'data'}->{'after'};
     }
 
-    # Ensure directory exists and create .forcegallery file immediately
-    unless (-d $dir) {
-        make_path($dir) or die "Failed to create directory $dir: $!\n";
-        open my $force_fh, '>', "$dir/.forcegallery" or die "Could not create .forcegallery file: $!\n";
-        close $force_fh;
-    }
     print color('bold green');
-    print "Done. Downloaded $count images to $dir.\n";
+    print "Done. Downloaded $count images to $base_dir.\n";
     print "Skipped $non_image_count non-image URLs.\n";
     print "$pdownloaded images were ignored because they already exist.\n";
     print color('reset');
 }
+
 
 ## Function to delete a reference from history and remove folder
 sub delete_reference {
