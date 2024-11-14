@@ -20,6 +20,21 @@ sub download_images {
     my %hashes;
     my $ua = LWP::UserAgent->new(agent => 'Mozilla/5.0');
 
+    # Check if subreddit/user exists before downloading
+    print color('bold green');
+    print "Checking existence of subreddit/user: $download_url\n";
+    print color('reset');
+    my $response = $ua->get($download_url);
+    unless ($response->is_success) {
+        warn color('bold red');
+        print "Error: Subreddit or user not found at $download_url (", $response->status_line, ")\n";
+        print color('reset');
+        return; # Exit function if subreddit/user is not found
+    }
+
+    # Create the directory only if the subreddit/user exists
+    make_path($dir);
+
     while ($download_url && $count < $num) {
         print color('bold green');
         print "Fetching data from URL: $download_url\n";
@@ -198,7 +213,6 @@ sub search_subreddits {
     return keys %subreddits;
 }
 
-
 # Main program
 my $log_file = 'download_log.dat';
 my $history = -e $log_file ? retrieve($log_file) : {};
@@ -235,22 +249,16 @@ MENU: while (1) {
             print color('reset');
             next MENU;
         }
-        print "Select a previous query: ('back' - back)\n";
+        print "Select a previous query:\n";
         for my $i (0 .. $#choices) {
             print "$i. $choices[$i]\n";
         }
         print "Enter your choice: ";
         my $choice = <STDIN>;
         chomp $choice;
-        next MENU if $choice eq 'back';
         if (defined $choices[$choice]) {
             $name = $choices[$choice];
-            print "How many images do you want to download? (default is 9999): ";
-            $num = <STDIN>;
-            chomp $num;
-            $num = $num ? $num : 9999;
-            $history->{$name} = $num;
-            print "Re-downloading $num images from $name\n";
+            $num = $history->{$name};
         } else {
             print color('bold red');
             print "Invalid choice.\n";
@@ -259,86 +267,15 @@ MENU: while (1) {
         }
     } elsif ($main_choice == 3) {
         delete_reference($history);
-        store $history, $log_file;
         next MENU;
     } elsif ($main_choice == 4) {
-        my @usernames = grep { /^u\// } keys %$history;
-        if (@usernames == 0) {
-            print color('bold red');
-            print "No users found in .dat file.\n";
-            print color('reset');
-            next MENU;
-        }
-
-        print "Select a user to view their subreddits ('back' to go back):\n";
-        for my $i (0 .. $#usernames) {
-            print "$i. $usernames[$i]\n";
-        }
-        print "Enter your choice: ";
-        my $user_choice = <STDIN>;
-        chomp $user_choice;
-        next MENU if $user_choice eq 'back';
-        if (defined $usernames[$user_choice]) {
-            my $username = substr($usernames[$user_choice], 2); # remove the 'u/' prefix
-            my @subreddits = search_subreddits($username);
-            if (@subreddits == 0) {
-                print color('bold red');
-                print "No subreddits found for user $username.\n";
-                print color('reset');
-                next MENU;
-            }
-
-            print "Select subreddits to download images from (comma-separated list of indices, 'back' to go back):\n";
-            for my $i (0 .. $#subreddits) {
-                print "$i. $subreddits[$i]\n";
-            }
-            print "Enter your choices: ";
-            my $subreddit_choices = <STDIN>;
-            chomp $subreddit_choices;
-            next MENU if $subreddit_choices eq 'back';
-            
-            my @selected_indices = split /,\s*/, $subreddit_choices;
-            my @selected_subreddits;
-            my %subreddit_nums;
-
-            foreach my $index (@selected_indices) {
-                if (defined $subreddits[$index]) {
-                    push @selected_subreddits, $subreddits[$index];
-                } else {
-                    print color('bold red');
-                    print "Invalid choice: $index\n";
-                    print color('reset');
-                    next MENU;
-                }
-            }
-
-            foreach my $subreddit (@selected_subreddits) {
-                print "How many images do you want to download from r/$subreddit? (default is 9999): ";
-                my $num_input = <STDIN>;
-                chomp $num_input;
-                $num = $num_input ? $num_input : 9999;
-                $subreddit_nums{$subreddit} = $num;
-                $history->{"r/$subreddit"} = $num;  # Log the subreddit and number of images
-            }
-
-            foreach my $subreddit (@selected_subreddits) {
-                $name = "r/$subreddit";  # Set $name for constructing the URL
-                $num = $subreddit_nums{$subreddit};
-                my $dir = "downloads/subreddit_images/$subreddit";  # New directory structure
-                make_path($dir);
-                my $url = "https://www.reddit.com/r/$subreddit.json?limit=100";
-
-                download_images($url, $dir, $num);
-                # Save the updated history after downloading images
-                store $history, $log_file;
-            }
-            next MENU;  # Add this line to skip the rest of the loop and avoid double downloading
-        } else {
-            print color('bold red');
-            print "Invalid choice.\n";
-            print color('reset');
-            next MENU;
-        }
+        print "Enter the username (without 'u/' prefix): ";
+        my $username = <STDIN>;
+        chomp $username;
+        my @subreddits = search_subreddits($username);
+        print "Subreddits posted by $username:\n";
+        print join(", ", @subreddits), "\n";
+        next MENU;
     } else {
         print color('bold red');
         print "Invalid choice.\n";
@@ -346,41 +283,23 @@ MENU: while (1) {
         next MENU;
     }
 
-    my $url;
-    if ($name =~ m{^u/}) {
-        $url = "https://www.reddit.com/user/" . substr($name, 2) . ".json?limit=100";
-    } elsif ($name =~ m{^r/}) {
-        $url = "https://www.reddit.com/r/" . substr($name, 2) . ".json?limit=100";
+    # Prepare URL and directory based on user/subreddit
+    my ($type, $dir);
+    if ($name =~ /^u\//) {
+        $type = "user";
+        $dir = "downloads/user_images/$name";
+        $name =~ s/^u\///;
+        download_images("https://www.reddit.com/user/$name/submitted/.json?limit=100", $dir, $num);
+    } elsif ($name =~ /^r\//) {
+        $type = "subreddit";
+        $dir = "downloads/subreddit_images/$name";
+        $name =~ s/^r\///;
+        download_images("https://www.reddit.com/r/$name/.json?limit=100", $dir, $num);
     } else {
         print color('bold red');
-        print "Invalid name. Please enter a subreddit or user name in the format of u/name or r/name.\n";
+        print "Invalid input. Please prefix with 'u/' for users or 'r/' for subreddits.\n";
         print color('reset');
-        next MENU;
     }
 
-    print color('bold green');
-    print "Constructed URL: $url\n";
-    print color('reset');
-
-    if (!defined $url) {
-        print color('bold red');
-        print "URL is not defined. There might be an issue with URL construction.\n";
-        print color('reset');
-        next MENU;
-    }
-
-    # Adjust directory path based on $name without 'u/' or 'r/' prefix
-    my $dir;
-    if ($name =~ m{^u/(.+)$}) {
-        $dir = "downloads/user_images/$1";  # Strip 'u/' prefix
-    } elsif ($name =~ m{^r/(.+)$}) {
-        $dir = "downloads/subreddit_images/$1";  # Strip 'r/' prefix
-    }
-    make_path($dir);
-
-    print "Downloading images...\n";
-    download_images($url, $dir, $num);
-
-    # Save the updated history
-    store $history, $log_file;
+    store($history, $log_file);
 }
